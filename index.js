@@ -77,6 +77,14 @@ async function run() {
             res.send(result);
         });
 
+        app.get('/issues', async (req, res) => {
+            const userEmail = req.query.userEmail;
+            if (!userEmail) return res.status(400).send({ message: 'Missing userEmail' });
+
+            const issues = await issuesCollection.find({ userEmail }).toArray();
+            res.send(issues);
+        });
+
 
 
 
