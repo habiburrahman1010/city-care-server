@@ -34,6 +34,50 @@ async function run() {
         await client.connect();
 
         const db = client.db('city_care_db');
+        const issuesCollection = db.collection('issues');
+
+
+
+        // issue post
+        app.post('/issues', async (req, res) => {
+            const issue = req.body;
+
+            const userEmail = issue.citizenEmail;
+
+            const count = await issuesCollection.countDocuments({
+                citizenEmail: userEmail,
+            });
+
+            if (!issue.isPremium && count >= 3) {
+                return res.status(403).send({
+                    message: 'Free users can only report 3 issues',
+                });
+            }
+
+            const newIssue = {
+                ...issue,
+                status: 'pending',
+                priority: 'normal',
+                upvotes: 0,
+                upvotedBy: [],
+                assignedStaff: null,
+                createdAt: new Date(),
+                timeline: [
+                    {
+                        status: 'pending',
+                        message: 'Issue reported by citizen',
+                        updatedBy: 'Citizen',
+                        time: new Date(),
+                    },
+                ],
+            };
+
+            const result = await issuesCollection.insertOne(newIssue);
+
+            res.send(result);
+        });
+
+
 
 
 
