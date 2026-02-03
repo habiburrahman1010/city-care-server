@@ -3,6 +3,9 @@ const cors = require('cors')
 const app = express();
 require('dotenv').config();
 
+
+const stripe = require('stripe')(process.env.STRIPE_PAYMENT);
+
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const port = process.env.PORT || 3000
@@ -81,19 +84,114 @@ async function run() {
         });
 
 
+        // Get user 
+        app.get('/users/:email', async (req, res) => {
+            const { email } = req.params;
+            const user = await usersCollection.findOne({ email });
+            if (!user) return res.status(404).send({ message: 'User not found' });
+            res.send(user);
+        });
+
+        app.patch('/users/:email', async (req, res) => {
+            const { email } = req.params;
+            const updateData = req.body;
+
+            const result = await usersCollection.findOneAndUpdate(
+                { email },
+                { $set: updateData },
+                { returnDocument: 'after' }
+            );
+
+            if (!result.value) return res.status(404).send({ message: 'User not found' });
+            res.send(result.value);
+        });
 
 
-        // issue post
+
+        //payment related api
+        app.post('/premium-checkout-session', async (req, res) => {
+            const { email } = req.body;
+
+            if (!email) return res.status(400).send({ error: 'Email is required' });
+
+            try {
+                const session = await stripe.checkout.sessions.create({
+                    payment_method_types: ['card'],
+                    line_items: [
+                        {
+                            price_data: {
+                                currency: 'usd',
+                                unit_amount: 1000 * 100,
+                                product_data: {
+                                    name: 'Premium Subscription',
+                                },
+                            },
+                            quantity: 1,
+                        },
+                    ],
+                    mode: 'payment',
+                    customer_email: email,
+                    success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+                    cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-canceled`,
+
+                    metadata: { email },
+                });
+
+                res.send({ url: session.url });
+            } catch (err) {
+                console.error('Stripe checkout error:', err);
+                res.status(500).send({ error: 'Failed to create checkout session' });
+            }
+        });
+
+        app.patch('/premium-success', async (req, res) => {
+            try {
+                const { sessionId, email } = req.body;
+
+                if (!sessionId || !email) {
+                    return res.status(400).send({ message: 'sessionId and email required' });
+                }
+
+                const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+                if (session.payment_status !== 'paid') {
+                    return res.status(400).send({ message: 'Payment not completed' });
+                }
+
+                const result = await usersCollection.updateOne(
+                    { email },
+                    { $set: { isPremium: true, premiumAt: new Date() } }
+                );
+
+                res.send({ success: true, result });
+            } catch (error) {
+                console.error('Premium update error:', error);
+                res.status(500).send({ message: 'Verification failed' });
+            }
+        });
+
+
+
         app.post('/issues', async (req, res) => {
             const issue = req.body;
-
             const userEmail = issue.userEmail;
 
-            const count = await issuesCollection.countDocuments({
-                citizenEmail: userEmail,
-            });
+            if (!userEmail) {
+                return res.status(400).send({ message: 'userEmail is required' });
+            }
 
-            if (!issue.isPremium && count >= 3) {
+
+            const user = await usersCollection.findOne({ email: userEmail });
+
+            if (!user) {
+                return res.status(404).send({ message: 'User not found' });
+            }
+
+
+            const count = await issuesCollection.countDocuments({ userEmail });
+
+
+            if (!user.isPremium && count >= 3) {
                 return res.status(403).send({
                     message: 'Free users can only report 3 issues',
                 });
@@ -121,6 +219,7 @@ async function run() {
 
             res.send(result);
         });
+
 
 
         // get single issue by id
