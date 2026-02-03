@@ -35,6 +35,51 @@ async function run() {
 
         const db = client.db('city_care_db');
         const issuesCollection = db.collection('issues');
+        const usersCollection = db.collection('users');
+
+        ///users api 
+
+        app.post('/users', async (req, res) => {
+            try {
+                const user = req.body;
+
+                if (!user?.email) {
+                    return res.status(400).send({ message: 'Email is required' });
+                }
+
+                const email = user.email;
+
+                const userExists = await usersCollection.findOne({ email });
+
+                if (userExists) {
+                    return res.send({
+                        message: 'user already exists',
+                        user: userExists,
+                    });
+                }
+
+                const newUser = {
+                    email: user.email,
+                    displayName: user.displayName || '',
+                    photoURL: user.photoURL || '',
+                    role: 'citizen',
+                    isPremium: false,
+                    isBlocked: false,
+                    createdAt: new Date(),
+                };
+
+                const result = await usersCollection.insertOne(newUser);
+
+                res.send({
+                    insertedId: result.insertedId,
+                    user: newUser,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: 'Failed to create user' });
+            }
+        });
+
 
 
 
@@ -42,7 +87,7 @@ async function run() {
         app.post('/issues', async (req, res) => {
             const issue = req.body;
 
-            const userEmail = issue.citizenEmail;
+            const userEmail = issue.userEmail;
 
             const count = await issuesCollection.countDocuments({
                 citizenEmail: userEmail,
@@ -77,6 +122,39 @@ async function run() {
             res.send(result);
         });
 
+
+        // get single issue by id
+        app.get('/issues/:id', async (req, res) => {
+            const { id } = req.params;
+
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).send({ message: 'Invalid ID' });
+            }
+
+            const issue = await issuesCollection.findOne({ _id: new ObjectId(id) });
+
+            if (!issue) {
+                return res.status(404).send({ message: 'Issue not found' });
+            }
+
+            res.send(issue);
+        });
+
+        app.patch('/issues/:email/:id', async (req, res) => {
+            const { id, email } = req.params;
+            const updateData = req.body;
+
+            const result = await issuesCollection.findOneAndUpdate(
+                { _id: new ObjectId(id), userEmail: email },
+                { $set: updateData },
+                { returnDocument: 'after' }
+            );
+
+            res.send(result.value);
+        });
+
+
+        //get api
         app.get('/issues', async (req, res) => {
             const userEmail = req.query.userEmail;
             if (!userEmail) return res.status(400).send({ message: 'Missing userEmail' });
@@ -84,6 +162,32 @@ async function run() {
             const issues = await issuesCollection.find({ userEmail }).toArray();
             res.send(issues);
         });
+
+
+        app.delete('/issues/:email/:id', async (req, res) => {
+            const { email, id } = req.params;
+
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).send({ message: 'Invalid ID format' });
+            }
+
+            const result = await issuesCollection.deleteOne({
+                _id: new ObjectId(id),
+                userEmail: email,
+            });
+
+            if (result.deletedCount === 0) {
+                return res.status(404).send({ message: 'Issue not found or not authorized' });
+            }
+
+            res.send({
+                deletedCount: result.deletedCount,
+                message: 'Deleted successfully',
+            });
+        });
+
+
+
 
 
 
